@@ -13,7 +13,7 @@ def main():
     target_map = extract_targets(bugs)
     bug_list = convert_bugs(bugs, target_map)
     for bug in bug_list:
-        print(bug.one_line_summary())
+        print(bug.summary())
     print("%d bugs read" % len(bug_list))
 
 
@@ -48,38 +48,56 @@ def convert_bugs(be_bugs, target_map):
     for be_bug in be_bugs:
         severity = be_bug.severity.get_text()
         if severity != "target":
-            bug_list.append(Bug(be_bug))
+            bug_list.append(Bug(be_bug, target_map))
     
     return sorted(bug_list, key=lambda b: b.created_at)
 
 
 class Bug:
 
-    def __init__(self, soup_tag):
+    def __init__(self, soup_tag, target_map):
         self.labels = []
         be_status = soup_tag.status.get_text()
         self.state = "open" if be_status == "open" else "closed"
         if be_status == "wontfix":
             self.labels.append("wontfix")
 
-        # Date format sample: Wed, 01 Apr 2009 22:12:16 +0000
-        # Timezone specifier is always +0000.
-        
         self.created_at = get_be_creation_date(soup_tag)
         self.title = soup_tag.summary.get_text()
 
         comment_tags = soup_tag.find_all("comment")
-        comments = [Comment(ct) for ct in comment_tags]
+        comments = sorted([Comment(ct) for ct in comment_tags],
+                          key=lambda c: c.created_at)
+        if comments:
+            self.body = comments[0].body_text
+            self.comments = comments[1:]
+        else:
+            self.body = ""
+            self.comments = []
 
-    def one_line_summary(self):
-        return self.created_at.strftime("%Y-%m-%d") + " " + \
-                self.state[0] + " " + self.title
+        self.milestone = None
+        extra_strings = soup_tag.find_all("extra-string")
+        for extra_string in extra_strings:
+            content = extra_string.get_text()
+            if content.startswith("BLOCKS:"):
+                uuid = content[7:]
+                if uuid in target_map:
+                    self.milestone = target_map[uuid]
+
+    def summary(self):
+        bug_line = self.created_at.strftime("%Y-%m-%d ") + str(self.milestone)\
+                   + " " + self.state[0] + " " + self.title
+        comment_lines = ["\n  " + c.created_at.strftime("%Y-%m-%d ")
+                         + c.body_text.translate({ord("\n"): ord(" ")})[:60]
+                         for c in self.comments]
+        return bug_line + "".join(comment_lines)
 
 
 class Comment:
 
     def __init__(self, soup_tag):
-        pass
+        self.created_at = get_be_creation_date(soup_tag, "date")
+        self.body_text = soup_tag.body.get_text()
 
 
 class Target:
@@ -89,9 +107,14 @@ class Target:
         self.created_at = get_be_creation_date(soup_tag)
         self.closed = not (soup_tag.status.get_text() == "open")
 
+    def __str__(self):
+        return self.title
 
-def get_be_creation_date(soup_tag):
-    return datetime.datetime.strptime(soup_tag.created.get_text(),
+
+def get_be_creation_date(soup_tag, subtag_name="created"):
+    # Date format is RFC2822, e.g. "Wed, 01 Apr 2009 22:12:16 +0000".
+    # Timezone specifier is always +0000.
+    return datetime.datetime.strptime(soup_tag.find(subtag_name).get_text(),
                                       "%a, %d %b %Y %H:%M:%S +0000")
 
 
