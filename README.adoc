@@ -16,4 +16,5 @@ Python 2.
 `xml-to-github.py` requires Beautiful Soup 4 and Python >=3.7.
 
 be-to-github is copyright 2020 Pontus Lurcock (pont@talvi.net) and released
-under th
+under the GNU General Public License, version 3 or later. See comments in
+source code and LICENSE file for details.
