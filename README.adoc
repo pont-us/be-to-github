@@ -1,0 +1,19 @@
+# be-to-github: convert Bugs Everywhere bugs to GitHub issues
+
+Note: be-to-github is currently in a pre-alpha (proof of concept) state.
+
+`be-to-github` is a utility to extract issues from a
+https://bugseverywhere.org/[Bugs Everywhere] database and recreate them as
+GitHub Issues using GitHub's GraphQL API.
+
+The utility consists of two scripts: `be-to-xml.py`, which produces an XML
+dump from a Bugs Everywhere database, and `xml-to-github.py` which uses the
+XML dump to create corresponding GitHub issues for a specified repository.
+
+`be-to-xml.py` requires an install of Bugs Everywhere, which only runs on
+Python 2.
+
+`xml-to-github.py` requires Beautiful Soup 4 and Python >=3.7.
+
+be-to-github is copyright 2020 Pontus Lurcock (pont@talvi.net) and released
+under th
