@@ -26,6 +26,7 @@ import os
 from typing import Mapping, List, Optional
 
 from bs4 import BeautifulSoup, Tag, ResultSet
+import github
 
 
 def main():
@@ -44,7 +45,7 @@ def main():
     if args.dump:
         converter.print_summary()
     if args.owner and args.repo:
-        converter.export_to_github(args.owner, args.repo)
+        converter.export_via_pygithub(args.owner, args.repo)
 
 
 class Converter:
@@ -87,6 +88,13 @@ class Converter:
         else:
             raise Exception(f"GraphQL query failed "
                             f"(Status code: {request.status_code})")
+
+    def export_via_pygithub(self, owner: str, repo_name: str):
+        gh = github.Github(os.environ["BE_TO_GITHUB_TOKEN"])
+        repo = gh.get_repo(f"{owner}/{repo_name}")
+        # TODO: create milestones
+        for bug in self.bug_list[:2]:
+            bug.export_via_pygithub(repo)
 
     @staticmethod
     def extract_targets(bug_tags: ResultSet) -> Mapping[str, Target]:
@@ -142,9 +150,9 @@ class Bug:
         # created, summary, extra-string
 
         self.labels = []
-        be_status = soup_tag.status.get_text()
-        self.state = "open" if be_status == "open" else "closed"
-        if be_status == "wontfix":
+        self.be_status = soup_tag.status.get_text()
+        self.state = "open" if self.be_status == "open" else "closed"
+        if self.be_status == "wontfix":
             self.labels.append("wontfix")
 
         self.created_at = get_be_creation_date(soup_tag)
@@ -197,6 +205,24 @@ class Bug:
         }''' % (repo_id, self.title, self.body)
         return query
 
+    def export_via_pygithub(self, repo):
+        extended_body = self.body + f"""
+
+```
+Bugs Everywhere data:
+Status: {self.be_status}
+Created at: {self.created_at.isoformat()}
+```
+"""
+        issue = repo.create_issue(
+            title=self.title,
+            body=extended_body,
+            # TODO set milestone here
+        )
+        issue.edit(state=self.state)
+        for comment in self.comments:
+            comment.export_via_pygithub(issue)
+
 
 class Comment:
 
@@ -219,6 +245,9 @@ class Comment:
             }
         ''' % (issue_id, self.body_text)
         return query
+
+    def export_via_pygithub(self, issue: github.Issue):
+        issue.create_comment(self.body_text)
 
 
 class Target:
