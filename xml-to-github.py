@@ -182,17 +182,19 @@ class Bug:
         # Currently only includes title and body, and doesn't add comments.
         # (But comments may need a separate method anyway, since we don't
         # know the Issue ID until it's been created.)
-        query = """
+        query = '''
         mutation Operation1 {
             createIssue(input: {
                 repositoryId: "%s",
                 title: "%s",
-                body: "%s"}) {
+                body: """
+        %s
+                """}) {
                 issue {
-                    title, body
+                    id
                 }
             }
-        }""" % (repo_id, self.title, self.body)
+        }''' % (repo_id, self.title, self.body)
         return query
 
 
@@ -202,6 +204,21 @@ class Comment:
         # Comment elements: uuid, short-name, author, date, content-type, body
         self.created_at = get_be_creation_date(soup_tag, "date")
         self.body_text = soup_tag.body.get_text()
+
+    def to_graphql(self, issue_id: str) -> str:
+        query = '''
+        mutation Operation1 {
+            addComment(input: {
+              subjectId: "%s",
+              body: """
+        %s
+              """
+            }) {
+              clientMutationId
+            }
+            }
+        ''' % (issue_id, self.body_text)
+        return query
 
 
 class Target:
