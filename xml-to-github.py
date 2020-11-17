@@ -93,6 +93,7 @@ class Converter:
         gh = github.Github(os.environ["BE_TO_GITHUB_TOKEN"])
         repo = gh.get_repo(f"{owner}/{repo_name}")
         # TODO: create milestones
+        # TODO: export more than two bugs (currently restricted for testing)
         for bug in self.bug_list[:2]:
             bug.export_via_pygithub(repo)
 
@@ -149,6 +150,11 @@ class Bug:
         # Bug elements: uuid, short-name, severity, status, reporter, creator,
         # created, summary, extra-string
 
+        self.uuid = soup_tag.uuid.get_text()
+        self.short_name = soup_tag.find("short-name").get_text()
+        self.severity = soup_tag.severity.get_text()
+        self.reporter = soup_tag.reporter.get_text()
+        self.creator = soup_tag.creator.get_text()
         self.labels = []
         self.be_status = soup_tag.status.get_text()
         self.state = "open" if self.be_status == "open" else "closed"
@@ -186,7 +192,6 @@ class Bug:
         return bug_line + "".join(comment_lines)
 
     def to_graphql(self, repo_id: str) -> str:
-        # TODO: implement fully.
         # Currently only includes title and body, and doesn't add comments.
         # (But comments may need a separate method anyway, since we don't
         # know the Issue ID until it's been created.)
@@ -210,10 +215,17 @@ class Bug:
 
 ```
 Bugs Everywhere data:
+UUID: {self.uuid}
+Short name: {self.short_name}
+Severity: {self.severity}
 Status: {self.be_status}
+Reporter: {self.reporter}
+Creator: {self.creator}
 Created at: {self.created_at.isoformat()}
 ```
 """
+        # TODO: provide a mechanism to select BE fields to write
+        # TODO: strip ditz number (if any) from title and add it to BE block
         issue = repo.create_issue(
             title=self.title,
             body=extended_body,
@@ -246,8 +258,9 @@ class Comment:
         ''' % (issue_id, self.body_text)
         return query
 
-    def export_via_pygithub(self, issue: github.Issue):
+    def export_via_pygithub(self, issue):
         issue.create_comment(self.body_text)
+        # TODO: add a block of BE data to the body text
 
 
 class Target:
