@@ -21,6 +21,8 @@ from __future__ import annotations  # see PEP 563
 
 import argparse
 import datetime
+import re
+
 import requests
 import os
 from typing import Mapping, List, Optional
@@ -53,10 +55,10 @@ class Converter:
     def __init__(self, file_content: str):
         soup = BeautifulSoup(file_content, "xml")
         bug_tags = soup.bugs.find_all("bug")
-        target_map = self.extract_targets(bug_tags)
+        self.target_map = self.extract_targets(bug_tags)
         self._graphql_headers = \
             {"Authorization": "Bearer " + os.environ["BE_TO_GITHUB_TOKEN"]}
-        self.bug_list = self.convert_bugs(bug_tags, target_map)
+        self.bug_list = self.convert_bugs(bug_tags)
 
     def print_summary(self):
         for bug in self.bug_list:
@@ -64,7 +66,7 @@ class Converter:
         print("%d bugs read" % len(self.bug_list))
 
     def export_to_github(self, owner: str, repo_name: str):
-        # TODO: implement fully -- at present, this only converts one bug.
+        # Note: at present only exports the first bug
         repo_id = self._get_repo_id(owner, repo_name)
         self._graphql_query(self.bug_list[0].to_graphql(repo_id))
 
@@ -92,10 +94,13 @@ class Converter:
     def export_via_pygithub(self, owner: str, repo_name: str):
         gh = github.Github(os.environ["BE_TO_GITHUB_TOKEN"])
         repo = gh.get_repo(f"{owner}/{repo_name}")
-        # TODO: create milestones
         # TODO: export more than two bugs (currently restricted for testing)
+        milestone_map = {}
+        for target in self.target_map.values():
+            milestone_map[target.title] = repo.create_milestone(
+                title=target.title, state="closed" if target.closed else "open")
         for bug in self.bug_list[:2]:
-            bug.export_via_pygithub(repo)
+            bug.export_via_pygithub(repo, milestone_map)
 
     @staticmethod
     def extract_targets(bug_tags: ResultSet) -> Mapping[str, Target]:
@@ -115,10 +120,7 @@ class Converter:
                 target_map[bug_tag.uuid.get_text()] = Target(bug_tag)
         return target_map
 
-    @staticmethod
-    def convert_bugs(
-            bug_tags: ResultSet, target_map: Mapping[str, Target]
-    ) -> List[Bug]:
+    def convert_bugs(self, bug_tags: ResultSet) -> List[Bug]:
         """Convert BeautifulSoup ResultSet to a list of bugs
 
         Take a BeautifulSoup ResultSet containing exported Bugs Everywhere
@@ -131,7 +133,7 @@ class Converter:
         for bug_tag in bug_tags:
             severity = bug_tag.severity.get_text()
             if severity != "target":
-                bug_list.append(Bug(bug_tag, target_map))
+                bug_list.append(Bug(bug_tag, self.target_map))
 
         return sorted(bug_list, key=lambda b: b.created_at)
 
@@ -210,28 +212,31 @@ class Bug:
         }''' % (repo_id, self.title, self.body)
         return query
 
-    def export_via_pygithub(self, repo):
-        extended_body = self.body + f"""
-
-```
+    def export_via_pygithub(self, repo, milestone_map):
+        # TODO: add mechanism to selectively disable line break removal
+        match = re.search(r"^(.*) \[(\d+)]$", self.title)
+        if match is not None:
+            title, ditz_index = match.groups()
+        else:
+            title, ditz_index = self.title, None
+        create_args = dict(
+            title=title,
+            body=self.body.replace("\n", " "),
+        )
+        if self.milestone is not None:
+            create_args["milestone"] = milestone_map[self.milestone.title]
+        issue = repo.create_issue(**create_args)
+        issue.edit(state=self.state)
+        ditz_part = "" if ditz_index is None else \
+            ("Ditz bug index: %s\n" % ditz_index)
+        issue.create_comment(f"""```
 Bugs Everywhere data:
+Created at: {self.created_at.isoformat(" ")}
+Status: {self.be_status}
+Severity: {self.severity}
 UUID: {self.uuid}
 Short name: {self.short_name}
-Severity: {self.severity}
-Status: {self.be_status}
-Reporter: {self.reporter}
-Creator: {self.creator}
-Created at: {self.created_at.isoformat()}
-```
-"""
-        # TODO: provide a mechanism to select BE fields to write
-        # TODO: strip ditz number (if any) from title and add it to BE block
-        issue = repo.create_issue(
-            title=self.title,
-            body=extended_body,
-            # TODO set milestone here
-        )
-        issue.edit(state=self.state)
+{ditz_part}```""")
         for comment in self.comments:
             comment.export_via_pygithub(issue)
 
@@ -242,6 +247,7 @@ class Comment:
         # Comment elements: uuid, short-name, author, date, content-type, body
         self.created_at = get_be_creation_date(soup_tag, "date")
         self.body_text = soup_tag.body.get_text()
+        self.uuid = soup_tag.uuid.get_text()
 
     def to_graphql(self, issue_id: str) -> str:
         query = '''
@@ -259,8 +265,10 @@ class Comment:
         return query
 
     def export_via_pygithub(self, issue):
-        issue.create_comment(self.body_text)
-        # TODO: add a block of BE data to the body text
+        issue.create_comment(
+            self.created_at.isoformat(" ") + "\n\n" +
+            self.body_text.replace("\n", " ") + "\n\n" +
+            f"UUID: {self.uuid}")
 
 
 class Target:
