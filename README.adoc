@@ -1,7 +1,5 @@
 # be-to-github: convert Bugs Everywhere bugs to GitHub issues
 
-Note: be-to-github is currently in a pre-alpha (proof of concept) state.
-
 `be-to-github` is a utility to extract issues from a
 https://bugseverywhere.org/[Bugs Everywhere] database and recreate them as
 GitHub Issues using GitHub's API.

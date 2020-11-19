@@ -107,12 +107,11 @@ class Converter:
     ) -> None:
         gh = github.Github(os.environ["BE_TO_GITHUB_TOKEN"])
         repo = gh.get_repo(f"{owner}/{repo_name}")
-        # TODO: export more than two bugs (currently restricted for testing)
         milestone_map = {}
         for target in self.target_map.values():
             milestone_map[target.title] = repo.create_milestone(
                 title=target.title, state="closed" if target.closed else "open")
-        for bug in self.bug_list[:2]:
+        for bug in self.bug_list:
             bug.export_via_pygithub(repo, milestone_map, verbose,
                                     self.preserve_newlines)
 
@@ -228,7 +227,6 @@ class Bug:
 
     def export_via_pygithub(self, repo, milestone_map, verbose: bool,
                             preserve_newlines: Set[str]):
-        # TODO: add mechanism to selectively disable line break removal
         match = re.search(r"^(.*) \[(\d+)]$", self.title)
         if match is not None:
             title, ditz_index = match.groups()
