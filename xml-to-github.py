@@ -25,7 +25,7 @@ import re
 
 import requests
 import os
-from typing import Mapping, List, Optional
+from typing import Mapping, List, Optional, Set
 
 from bs4 import BeautifulSoup, Tag, ResultSet
 import github
@@ -33,7 +33,7 @@ import github
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dump-to", type=str,
+    parser.add_argument("--dump-to", type=str, metavar="FILENAME",
                         help="Write a summary to the specified file.")
     parser.add_argument("--owner", type=str,
                         help="GitHub username of repository owner")
@@ -41,11 +41,14 @@ def main():
                         help="name of GitHub repository")
     parser.add_argument("--verbose", action="store_true",
                         help="Report conversion progress to standard output.")
+    parser.add_argument("--preserve-newlines", metavar="FILENAME", type=str,
+                        help="File listing UUIDs for which newlines should be "
+                             "preserved.")
     parser.add_argument("xml_file", type=str, help="exported BE XML file")
     args = parser.parse_args()
     with open(args.xml_file, "r") as fh:
         file_content = fh.read()
-    converter = Converter(file_content)
+    converter = Converter(file_content, args.preserve_newlines)
     if args.dump_to:
         converter.print_summary(args.dump_to)
     if args.owner and args.repo:
@@ -54,13 +57,19 @@ def main():
 
 class Converter:
 
-    def __init__(self, file_content: str):
+    def __init__(self, file_content: str,
+                 preserve_newlines_file: Optional[str]):
         soup = BeautifulSoup(file_content, "xml")
         bug_tags = soup.bugs.find_all("bug")
         self.target_map = self.extract_targets(bug_tags)
         self._graphql_headers = \
             {"Authorization": "Bearer " + os.environ["BE_TO_GITHUB_TOKEN"]}
         self.bug_list = self.convert_bugs(bug_tags)
+        self.preserve_newlines = set()
+        if preserve_newlines_file is not None:
+            with open(preserve_newlines_file, "r") as fh:
+                for line in fh.readlines():
+                    self.preserve_newlines.add(line.strip())
 
     def print_summary(self, filename):
         with open(filename, "w") as fh:
@@ -104,7 +113,8 @@ class Converter:
             milestone_map[target.title] = repo.create_milestone(
                 title=target.title, state="closed" if target.closed else "open")
         for bug in self.bug_list[:2]:
-            bug.export_via_pygithub(repo, milestone_map, verbose)
+            bug.export_via_pygithub(repo, milestone_map, verbose,
+                                    self.preserve_newlines)
 
     @staticmethod
     def extract_targets(bug_tags: ResultSet) -> Mapping[str, Target]:
@@ -216,7 +226,8 @@ class Bug:
         }''' % (repo_id, self.title, self.body)
         return query
 
-    def export_via_pygithub(self, repo, milestone_map, verbose: bool):
+    def export_via_pygithub(self, repo, milestone_map, verbose: bool,
+                            preserve_newlines: Set[str]):
         # TODO: add mechanism to selectively disable line break removal
         match = re.search(r"^(.*) \[(\d+)]$", self.title)
         if match is not None:
@@ -225,7 +236,8 @@ class Bug:
             title, ditz_index = self.title, None
         create_args = dict(
             title=title,
-            body=unwrap_lines(self.body),
+            body=(self.body if self.uuid in preserve_newlines
+                  else unwrap_lines(self.body)),
         )
         if self.milestone is not None:
             create_args["milestone"] = milestone_map[self.milestone.title]
@@ -244,7 +256,7 @@ Short name: {self.short_name}
         if verbose:
             print(title)
         for comment in self.comments:
-            comment.export_via_pygithub(issue, verbose)
+            comment.export_via_pygithub(issue, verbose, preserve_newlines)
 
 
 class Comment:
@@ -270,10 +282,12 @@ class Comment:
         ''' % (issue_id, self.body_text)
         return query
 
-    def export_via_pygithub(self, issue, verbose):
+    def export_via_pygithub(self, issue, verbose, preserve_newlines):
         issue.create_comment(
             self.created_at.isoformat(" ") + "\n\n" +
-            unwrap_lines(self.body_text) + "\n\n" +
+            (self.body_text if self.uuid in preserve_newlines
+             else unwrap_lines(self.body_text))
+            + "\n\n" +
             f"UUID: {self.uuid}")
         if verbose:
             print("  " + self.body_text[:40] + "...")
