@@ -33,21 +33,23 @@ import github
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dump", action="store_true",
-                        help="Write a summary to the standard output.")
+    parser.add_argument("--dump-to", type=str,
+                        help="Write a summary to the specified file.")
     parser.add_argument("--owner", type=str,
                         help="GitHub username of repository owner")
     parser.add_argument("--repo", type=str,
                         help="name of GitHub repository")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Report conversion progress to standard output.")
     parser.add_argument("xml_file", type=str, help="exported BE XML file")
     args = parser.parse_args()
     with open(args.xml_file, "r") as fh:
         file_content = fh.read()
     converter = Converter(file_content)
-    if args.dump:
-        converter.print_summary()
+    if args.dump_to:
+        converter.print_summary(args.dump_to)
     if args.owner and args.repo:
-        converter.export_via_pygithub(args.owner, args.repo)
+        converter.export_via_pygithub(args.owner, args.repo, args.verbose)
 
 
 class Converter:
@@ -60,10 +62,10 @@ class Converter:
             {"Authorization": "Bearer " + os.environ["BE_TO_GITHUB_TOKEN"]}
         self.bug_list = self.convert_bugs(bug_tags)
 
-    def print_summary(self):
-        for bug in self.bug_list:
-            print(bug.summary())
-        print("%d bugs read" % len(self.bug_list))
+    def print_summary(self, filename):
+        with open(filename, "w") as fh:
+            fh.writelines(bug.summary() + "\n" for bug in self.bug_list)
+            fh.write("%d bugs read\n" % len(self.bug_list))
 
     def export_to_github(self, owner: str, repo_name: str):
         # Note: at present only exports the first bug
@@ -91,7 +93,9 @@ class Converter:
             raise Exception(f"GraphQL query failed "
                             f"(Status code: {request.status_code})")
 
-    def export_via_pygithub(self, owner: str, repo_name: str):
+    def export_via_pygithub(
+            self, owner: str, repo_name: str, verbose: bool
+    ) -> None:
         gh = github.Github(os.environ["BE_TO_GITHUB_TOKEN"])
         repo = gh.get_repo(f"{owner}/{repo_name}")
         # TODO: export more than two bugs (currently restricted for testing)
@@ -100,7 +104,7 @@ class Converter:
             milestone_map[target.title] = repo.create_milestone(
                 title=target.title, state="closed" if target.closed else "open")
         for bug in self.bug_list[:2]:
-            bug.export_via_pygithub(repo, milestone_map)
+            bug.export_via_pygithub(repo, milestone_map, verbose)
 
     @staticmethod
     def extract_targets(bug_tags: ResultSet) -> Mapping[str, Target]:
@@ -212,7 +216,7 @@ class Bug:
         }''' % (repo_id, self.title, self.body)
         return query
 
-    def export_via_pygithub(self, repo, milestone_map):
+    def export_via_pygithub(self, repo, milestone_map, verbose: bool):
         # TODO: add mechanism to selectively disable line break removal
         match = re.search(r"^(.*) \[(\d+)]$", self.title)
         if match is not None:
@@ -221,7 +225,7 @@ class Bug:
             title, ditz_index = self.title, None
         create_args = dict(
             title=title,
-            body=self.body.replace("\n", " "),
+            body=unwrap_lines(self.body),
         )
         if self.milestone is not None:
             create_args["milestone"] = milestone_map[self.milestone.title]
@@ -237,8 +241,10 @@ Severity: {self.severity}
 UUID: {self.uuid}
 Short name: {self.short_name}
 {ditz_part}```""")
+        if verbose:
+            print(title)
         for comment in self.comments:
-            comment.export_via_pygithub(issue)
+            comment.export_via_pygithub(issue, verbose)
 
 
 class Comment:
@@ -264,11 +270,13 @@ class Comment:
         ''' % (issue_id, self.body_text)
         return query
 
-    def export_via_pygithub(self, issue):
+    def export_via_pygithub(self, issue, verbose):
         issue.create_comment(
             self.created_at.isoformat(" ") + "\n\n" +
-            self.body_text.replace("\n", " ") + "\n\n" +
+            unwrap_lines(self.body_text) + "\n\n" +
             f"UUID: {self.uuid}")
+        if verbose:
+            print("  " + self.body_text[:40] + "...")
 
 
 class Target:
@@ -290,6 +298,13 @@ def get_be_creation_date(
     return datetime.datetime.strptime(soup_tag.find(subtag_name).get_text(),
                                       "%a, %d %b %Y %H:%M:%S +0000")
 
+
+def unwrap_lines(wrapped: str) -> str:
+    """Replace newlines with spaces.
+
+    Multiple successive newlines are not replaced. Neither is a newline
+    at the end of the string."""
+    return re.sub(r"(?<!\n)\n(?!(\n|$))", " ", wrapped)
 
 if __name__ == "__main__":
     main()
