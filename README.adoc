@@ -13,6 +13,12 @@ Python 2.
 
 `xml-to-github.py` requires Beautiful Soup 4, pygithub, and Python >=3.7.
 
+The repository also includes a utility script, `github-tool.py`, which can
+delete all the issues or all the milestones from a specified repository.
+
+`xml-to-github.py` and `github-tool.py` both require a valid GitHub API token
+to be present in an environment variable named `BE_TO_GITHUB_TOKEN`.
+
 be-to-github is copyright 2020 Pontus Lurcock (pont@talvi.net) and released
 under the GNU General Public License, version 3 or later. See comments in
 source code and LICENSE file for details.

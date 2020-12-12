@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 # Copyright 2020 Pontus Lurcock
 #
@@ -317,6 +317,7 @@ def unwrap_lines(wrapped: str) -> str:
     Multiple successive newlines are not replaced. Neither is a newline
     at the end of the string."""
     return re.sub(r"(?<!\n)\n(?!(\n|$))", " ", wrapped)
+
 
 if __name__ == "__main__":
     main()
